@@ -7,7 +7,7 @@ use std::{
 
 use irondash_engine_context::EngineContext;
 use irondash_message_channel::{Late, Value};
-use irondash_run_loop::{platform::PollSession, RunLoop};
+use irondash_run_loop::RunLoop;
 use log::warn;
 use windows::{
     core::{implement, ComInterface, PCWSTR},
@@ -400,16 +400,8 @@ impl PlatformDropContext {
                 *effect,
                 Some(session.last_operation.get()),
             )?;
-            let done = Rc::new(Cell::new(false));
-            let done_clone = done.clone();
-            self.delegate()?.send_perform_drop(
-                self.id,
-                event,
-                Box::new(move |r| {
-                    r.ok_log();
-                    done_clone.set(true);
-                }),
-            );
+
+            // Handle IDataObjectAsyncCapability if supported
             let data_object_async = session.data_object.cast::<IDataObjectAsyncCapability>();
             if let Ok(data_object_async) = data_object_async {
                 if let Ok(res) = unsafe { data_object_async.GetAsyncMode() } {
@@ -426,25 +418,49 @@ impl PlatformDropContext {
                     }
                 }
             }
-            // Poll with a deadline to avoid deadlocking when multiple instances
-            // are running. The poll_once loop processes all pending messages,
-            // including cross-process COM STA messages from other instances.
-            // When DoDragDrop holds the STA lock in instance A and instance B
-            // exists, those cross-process messages try to re-acquire the same
-            // lock causing RtlAcquireRelockExclusive to spin forever.
-            // We use a time-bounded loop so we always exit and release the lock.
-            let start = std::time::Instant::now();
-            let timeout = std::time::Duration::from_millis(500);
-            let mut poll_session = PollSession::new();
-            while !done.get() {
-                RunLoop::current()
-                    .platform_run_loop
-                    .poll_once(&mut poll_session);
-                if start.elapsed() >= timeout {
-                    break;
-                }
-            }
-            self.drop_end()?;
+
+            // Do NOT spin-poll waiting for Dart's onPerformDrop to complete.
+            //
+            // The original code used a poll_once loop here, which works for a
+            // single instance but deadlocks with 2+ instances:
+            //   - DoDragDrop (drag.rs) holds the COM STA lock while it's running
+            //   - poll_once pumps ALL Windows messages, including cross-process
+            //     COM messages from the other instance
+            //   - those messages try to acquire the same STA lock
+            //   - neither side can proceed -> RtlAcquireRelockExclusive spins forever
+            //
+            // Instead we return from IDropTarget::Drop immediately, which lets
+            // DoDragDrop complete and release the STA lock. drop_end() is then
+            // called either from the send_perform_drop callback (if Dart responds
+            // before DoDragDrop unwinds) or from local_dragging_did_end() which
+            // drag.rs calls after DoDragDrop returns. We reuse the existing
+            // missing_drop_end flag for exactly this handoff.
+            let weak_self = self.weak_self.clone();
+            self.delegate()?.send_perform_drop(
+                self.id,
+                event,
+                Box::new(move |r| {
+                    r.ok_log();
+                    // Dart confirmed the drop. Call drop_end only if
+                    // local_dragging_did_end hasn't already done so.
+                    if let Some(ctx) = weak_self.upgrade() {
+                        let still_pending = ctx
+                            .current_session
+                            .borrow()
+                            .as_ref()
+                            .map(|s| s.missing_drop_end.get())
+                            .unwrap_or(false);
+                        if still_pending {
+                            ctx.drop_end().ok_log();
+                        }
+                    }
+                }),
+            );
+
+            // Mark as pending so local_dragging_did_end() in drag.rs knows to
+            // call drop_end() after DoDragDrop returns if Dart hasn't responded yet.
+            session.missing_drop_end.set(true);
+
         } else {
             *effect = DROPEFFECT_NONE;
         }
