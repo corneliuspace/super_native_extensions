@@ -44,13 +44,19 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 
-include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(${PLUGIN_NAME} ../rust super_native_extensions super_native_extensions_init)
+# =============================================================================
+# BYPASS CARGOKIT: Link directly against your precompiled Rust binary
+# =============================================================================
+
+# Tell CMake exactly where your precompiled DLL is sitting inside your repository
+set(PRECOMPILED_RUST_LIB "${CMAKE_CURRENT_SOURCE_DIR}/bin/super_native_extensions.dll")
+
+# Force the Flutter plugin architecture to link against this precompiled binary
+target_link_libraries(${PLUGIN_NAME} PRIVATE "${PRECOMPILED_RUST_LIB}")
 
 # List of absolute paths to libraries that should be bundled with the plugin.
-# This list could contain prebuilt libraries, or libraries created by an
-# external build triggered from this build file.
+# We explicitly pass our precompiled binary out to the parent Flutter scope.
 set(super_native_extensions_bundled_libraries
-  "${${PLUGIN_NAME}_cargokit_lib}"
+  "${PRECOMPILED_RUST_LIB}"
   PARENT_SCOPE
 )
