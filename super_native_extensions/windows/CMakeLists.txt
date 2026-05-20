@@ -48,8 +48,16 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 # BYPASS CARGOKIT: Link directly against your precompiled Rust binary
 # =============================================================================
 
-# Tell CMake exactly where your precompiled DLL is sitting inside your repository
-set(PRECOMPILED_RUST_LIB "${CMAKE_CURRENT_SOURCE_DIR}/bin/super_native_extensions.dll")
+# 1. Link against the import library (.lib) so Visual Studio can compile the C++ side
+set(PRECOMPILED_RUST_LIB "${CMAKE_CURRENT_SOURCE_DIR}/bin/super_native_extensions.dll.lib")
+target_link_libraries(${PLUGIN_NAME} PRIVATE "${PRECOMPILED_RUST_LIB}")
+
+# 2. Tell Flutter to bundle the actual dynamic library (.dll) into the final app folder
+set(PRECOMPILED_RUST_DLL "${CMAKE_CURRENT_SOURCE_DIR}/bin/super_native_extensions.dll")
+set(super_native_extensions_bundled_libraries
+  "${PRECOMPILED_RUST_DLL}"
+  PARENT_SCOPE
+)
 
 # Force the Flutter plugin architecture to link against this precompiled binary
 target_link_libraries(${PLUGIN_NAME} PRIVATE "${PRECOMPILED_RUST_LIB}")
