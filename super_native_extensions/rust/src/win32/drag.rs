@@ -233,6 +233,13 @@ impl PlatformDragContext {
             );
         }
 
+        // Yield briefly after DoDragDrop returns so the run loop can flush
+        // any pending cross-process COM messages from other running instances
+        // before we notify Dart that the drag session ended. Without this,
+        // the STA lock is released but other instances' queued COM messages
+        // haven't been processed yet, causing the next drag to deadlock.
+        RunLoop::current().schedule_next(move || {}).detach();
+
         // Data source might be still in use through IDataObjectAsyncCapability,
         // but we want to let user know that drag session ended immediately.
         // COM will make sure that the data object is kept alive and when

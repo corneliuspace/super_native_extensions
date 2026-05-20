@@ -426,11 +426,23 @@ impl PlatformDropContext {
                     }
                 }
             }
+            // Poll with a deadline to avoid deadlocking when multiple instances
+            // are running. The poll_once loop processes all pending messages,
+            // including cross-process COM STA messages from other instances.
+            // When DoDragDrop holds the STA lock in instance A and instance B
+            // exists, those cross-process messages try to re-acquire the same
+            // lock causing RtlAcquireRelockExclusive to spin forever.
+            // We use a time-bounded loop so we always exit and release the lock.
+            let start = std::time::Instant::now();
+            let timeout = std::time::Duration::from_millis(500);
             let mut poll_session = PollSession::new();
             while !done.get() {
                 RunLoop::current()
                     .platform_run_loop
                     .poll_once(&mut poll_session);
+                if start.elapsed() >= timeout {
+                    break;
+                }
             }
             self.drop_end()?;
         } else {
