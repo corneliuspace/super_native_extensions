@@ -44,35 +44,13 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 
-# =============================================================================
-# BYPASS CARGOKIT: Link directly against your precompiled Rust binary
-# Place both files in: windows/bin/
-#   - super_native_extensions.dll      (runtime, bundled into your app)
-#   - super_native_extensions.dll.lib  (import lib, used only at link time)
-# =============================================================================
+include("../cargokit/cmake/cargokit.cmake")
+apply_cargokit(${PLUGIN_NAME} ../rust super_native_extensions super_native_extensions_init)
 
-# 1. Dynamically target architecture (x64 is default for Flutter Windows)
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(ARCH "x64")
-else()
-    set(ARCH "x86")
-endif()
-
-# Recommended: Put your binaries in windows/bin/x64/ to avoid arch conflicts
-set(PRECOMPILED_DLL "${CMAKE_CURRENT_SOURCE_DIR}/bin/${ARCH}/super_native_extensions.dll")
-set(PRECOMPILED_LIB "${CMAKE_CURRENT_SOURCE_DIR}/bin/${ARCH}/super_native_extensions.dll.lib")
-
-# Link the import library for compile time
-target_link_libraries(${PLUGIN_NAME} PRIVATE "${PRECOMPILED_LIB}")
-
-# 2. FORCE Flutter to bundle the DLL into the final executable directory
-# We hook into Flutter's native bundle architecture macro
-list(APPEND super_native_extensions_bundled_libraries "${PRECOMPILED_DLL}")
-set(super_native_extensions_bundled_libraries ${super_native_extensions_bundled_libraries} PARENT_SCOPE)
-
-# 3. Bulletproof fallback: Manually copy the DLL to the build output directory
-add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${PRECOMPILED_DLL}"
-    "$<TARGET_FILE_DIR:${PLUGIN_NAME}>"
+# List of absolute paths to libraries that should be bundled with the plugin.
+# This list could contain prebuilt libraries, or libraries created by an
+# external build triggered from this build file.
+set(super_native_extensions_bundled_libraries
+  "${${PLUGIN_NAME}_cargokit_lib}"
+  PARENT_SCOPE
 )
