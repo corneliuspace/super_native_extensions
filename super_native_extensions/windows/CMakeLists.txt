@@ -51,15 +51,28 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 #   - super_native_extensions.dll.lib  (import lib, used only at link time)
 # =============================================================================
 
-set(PRECOMPILED_DLL "${CMAKE_CURRENT_SOURCE_DIR}/bin/super_native_extensions.dll")
-set(PRECOMPILED_LIB "${CMAKE_CURRENT_SOURCE_DIR}/bin/super_native_extensions.dll.lib")
+# 1. Dynamically target architecture (x64 is default for Flutter Windows)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ARCH "x64")
+else()
+    set(ARCH "x86")
+endif()
 
-# Link the import library so the C++ wrapper can resolve Rust symbols at compile time
+# Recommended: Put your binaries in windows/bin/x64/ to avoid arch conflicts
+set(PRECOMPILED_DLL "${CMAKE_CURRENT_SOURCE_DIR}/bin/${ARCH}/super_native_extensions.dll")
+set(PRECOMPILED_LIB "${CMAKE_CURRENT_SOURCE_DIR}/bin/${ARCH}/super_native_extensions.dll.lib")
+
+# Link the import library for compile time
 target_link_libraries(${PLUGIN_NAME} PRIVATE "${PRECOMPILED_LIB}")
 
-# Bundle ONLY the .dll into the final app output folder â€” NOT the .lib
-# The .lib is a link-time artifact only and must not be shipped
-set(super_native_extensions_bundled_libraries
-  "${PRECOMPILED_DLL}"
-  PARENT_SCOPE
+# 2. FORCE Flutter to bundle the DLL into the final executable directory
+# We hook into Flutter's native bundle architecture macro
+list(APPEND super_native_extensions_bundled_libraries "${PRECOMPILED_DLL}")
+set(super_native_extensions_bundled_libraries ${super_native_extensions_bundled_libraries} PARENT_SCOPE)
+
+# 3. Bulletproof fallback: Manually copy the DLL to the build output directory
+add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${PRECOMPILED_DLL}"
+    "$<TARGET_FILE_DIR:${PLUGIN_NAME}>"
 )
